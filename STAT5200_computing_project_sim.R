@@ -33,6 +33,34 @@ generate_data <- function(n, p, s) {
   return(list(sim_data = sim_data, betas_obs = betas_obs, betas_true = betas_true))
 }
 
+
+
+
+#########################################################################
+# function: generate_data 2, makes a dense model with a set signal to noise ratio
+generate_data2 <- function(n, p, SNR = 5, sigma = 1) {
+  
+  # X ~ N(0,1)
+  X <- matrix(rnorm(n * p), n, p)
+  
+  # Draw random direction for beta
+  beta_raw <- rnorm(p)
+  norm_raw <- sqrt(sum(beta_raw^2))
+  
+  # Set ||beta||^2 / sigma^2 = SNR
+  r <- sqrt(SNR) * sigma
+  beta <- beta_raw * (r / norm_raw)
+  
+  # Generate y = X beta + noise
+  y <- as.vector(X %*% beta + rnorm(n, 0, sigma))
+  
+  sim_data <- data.frame(y = y, X)
+  colnames(sim_data) <- c("y", paste0("X", 1:p))
+  
+  return(list(sim_data = sim_data, beta = beta))
+}
+
+
 ##########################################################################
 # Ridgeless OLS using pseudoinverse
 ridgeless_fit <- function(X, y, tol = 1e-8, lambda = 0) {
@@ -111,9 +139,15 @@ model_fits <- function(train_X, train_y, test_X, test_y, train) {
 ##########################################################################
 # Compute single simulation
 # train variable controls whether we include training mse also to get another graph
-compute_simulation <- function(n, p, s, seed, train = 0) {
+compute_simulation <- function(n, p, s, seed, train = 0, SNR) {
   set.seed(seed)
-  dat <- generate_data(n, p, s)
+  
+  if (SNR == 0) {
+    dat <- generate_data(n, p, s)
+  } else {
+    dat <- generate_data2(n, p, SNR)
+  }
+  
   sim_df <- dat$sim_data
   X <- as.matrix(sim_df[, -1])
   y <- sim_df$y
@@ -136,7 +170,7 @@ compute_simulation <- function(n, p, s, seed, train = 0) {
 }
 
 # Simulation study over varying p
-sim_study <- function(n, J, p_seq, s_fixed = 10, train) {
+sim_study <- function(n, J, p_seq, s_fixed = 10, train, SNR) {
   num_p <- length(p_seq)
   
   lasso_mse <-  matrix(NA, nrow = J, ncol= num_p)
@@ -153,7 +187,7 @@ sim_study <- function(n, J, p_seq, s_fixed = 10, train) {
   for (i in 1:num_p) {
     cat("Running p =", p_seq[i], "of", p_seq[num_p], "\n")
     for(j in 1:J) {
-      fit <- compute_simulation(n = n, p = p_seq[i], s = s_fixed, seed = 100 + j, train)
+      fit <- compute_simulation(n = n, p = p_seq[i], s = s_fixed, seed = 100 + j, train, SNR)
       lasso_mse[j, i] <- fit$lasso_mse
       ridge_mse[j, i] <- fit$ridge_mse
       ridgeless_mse[j, i] <- fit$ridgeless_mse
@@ -181,9 +215,9 @@ sim_study <- function(n, J, p_seq, s_fixed = 10, train) {
 
 ##########################################################################
 # calls the sim study and returns plot of test mse, optiol to include plot of train mse
-complete_run <- function(n, J, p_seq, s_fixed, train) {
+complete_run <- function(n, J, p_seq, s_fixed, train, SNR) {
   # Run simulation
-  results <- sim_study(n, J, p_seq, s_fixed, train)
+  results <- sim_study(n, J, p_seq, s_fixed, train, SNR)
   
   # Compute means and SDs
   lasso_mean <- colMeans(results$lasso_mse)
@@ -236,12 +270,12 @@ complete_run <- function(n, J, p_seq, s_fixed, train) {
 # end of functions
 
 # Parameters
-n <- 100
+n <- 250
 J <- 30
-p_seq <- seq(5, 300, by = 5)
-s_fixed <-  20  # small sparsity to show double descent
+p_seq <- seq(10, 600, by = 10)
+s_fixed <-  50  # small sparsity to show double descent
 
-plot_dfs <- complete_run(n, J, p_seq, s_fixed, train = 1)
+plot_dfs <- complete_run(n, J, p_seq, s_fixed, train = 1, SNR = 5)
 
 test_mse_df <- plot_dfs$test_mse_df
 
@@ -255,11 +289,11 @@ test_plot <- ggplot(test_mse_df, aes(x = p, y = MSE, color = Method)) +
   geom_errorbar(aes(ymin = MSE - SD, ymax = MSE + SD), width = 5, alpha = 0.3) +
   labs(
     title = "Double Descent Simulation",
-    subtitle = paste0("n = 100, J = 30, s = 70"),
+    subtitle = paste0("n = 250, J = 30, SNR = 5"),
     x = "Number of Predictors (p)",
     y = "Test MSE"
   ) +
-  coord_cartesian(ylim = c(0, 100))  +
+  coord_cartesian(ylim = c(0, 10))  +
   theme_minimal(base_size = 14) +
   theme(legend.position = "top", plot.title = element_text(face = "bold"))
 
@@ -272,11 +306,11 @@ train_plot <- ggplot(train_mse_df, aes(x = p, y = MSE, color = Method)) +
   geom_errorbar(aes(ymin = MSE - SD, ymax = MSE + SD), width = 5, alpha = 0.3) +
   labs(
     title = "Double Descent Simulation",
-    subtitle = paste0("n = 100, J = 30, s = 70"),
+    subtitle = paste0("n = 250, J = 30, SNR = 1"),
     x = "Number of Predictors (p)",
     y = "Train MSE"
   ) +
-  coord_cartesian(ylim = c(0, 50))  +
+  coord_cartesian(ylim = c(0, 2))  +
   theme_minimal(base_size = 14) +
   theme(legend.position = "top", plot.title = element_text(face = "bold"))
 
