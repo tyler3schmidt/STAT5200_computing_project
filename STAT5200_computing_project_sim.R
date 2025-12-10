@@ -1,14 +1,20 @@
 library(glmnet)
 library(ggplot2)
 
+
+
+
 ##########################################################################
 # function: generate_data
+# generates normal data with s nonzero betas where if s <+ p they are all observed
+# but if s > p we only observe the first s of them
+# betas_obs,and betas_true are redundant here
 generate_data <- function(n, p, s) {
   
   # observed predictors
   X <- matrix(rnorm(n * p), n, p)
   
-  # ---- Create true beta coefficients (length s) ----
+  #  Create true beta coefficients (length s)
   betas_true <- runif(s, 1, 3) * sample(c(-1, 1), s, replace = TRUE)
   
  
@@ -16,9 +22,9 @@ generate_data <- function(n, p, s) {
     betas_obs <- c(betas_true[1:s], rep(0, p - s))
     y <- X %*% betas_obs + rnorm(n, 0, 1)
     
-    # ---- Case 2: s > p ----
+    # Case 2: s > p
     # All p observed betas are nonzero
-    # Remaining (s - p) signals affect y but are unobserved latent variables
+    # Remaining (s - p) signals affect y but are unobserved variables
   } else {
     betas_obs <- betas_true[1:p]              # p nonzero betas
     X_latent <- matrix(rnorm(n * (s - p)), n, s - p)
@@ -37,18 +43,22 @@ generate_data <- function(n, p, s) {
 
 
 #########################################################################
-# function: generate_data 2, makes a dense model with a set signal to noise ratio
+# function: generate_data 2, 
+# makes a dense model with a set signal to noise ratio
+# inspired by hasties paper, beta is redundant here 
 generate_data2 <- function(n, p, SNR = 5, sigma = 1) {
   
-  # X ~ N(0,1)
+  # standard norm matrix n row p column
   X <- matrix(rnorm(n * p), n, p)
   
-  # Draw random direction for beta
+  # Draw random beta and find its norm
   beta_raw <- rnorm(p)
   norm_raw <- sqrt(sum(beta_raw^2))
   
-  # Set ||beta||^2 / sigma^2 = SNR
-  r <- sqrt(SNR) * sigma
+  # Set ||beta||^2 / sigma^2 = SNR implies r is the norm of the desired beta
+  r <- sqrt(SNR) * sigma 
+  
+  # rescaled beta_raw by the norm ratio to get the desired beta
   beta <- beta_raw * (r / norm_raw)
   
   # Generate y = X beta + noise
@@ -62,17 +72,23 @@ generate_data2 <- function(n, p, SNR = 5, sigma = 1) {
 
 
 ##########################################################################
-# Ridgeless OLS using pseudoinverse
+# function: ridgless_fit
+# computes moore-penrose pseudo inverse using SVD as discussed in the slides
+# note that tol provides numerical stability for super small singular values
+# if lambda > 1 we fit using ridge, to test if the limit of ridge is ridgless
 ridgeless_fit <- function(X, y, tol = 1e-8, lambda = 0) {
   # Compute SVD
   svd_X <- svd(X)
   
   # Compute D_plus, handling small singular values
+  # Note: ?svd shows that D = sigma
   D_plus <- diag(ifelse(svd_X$d > tol, 1 / svd_X$d, 0))
   
   # Optionally include tiny ridge regularization
+  # for comparison not used in final sim
   if (lambda > 0) {
-    D_plus <- diag(ifelse(svd_X$d > tol, svd_X$d / (svd_X$d^2 + lambda), 0))
+    x_pinv <- glmnet(X, y, alpha = 0, nfolds = 5,
+           intercept = FALSE, standardize = FALSE, lambda = lambda)
   }
   
   # Compute pseudoinverse
@@ -85,8 +101,12 @@ ridgeless_fit <- function(X, y, tol = 1e-8, lambda = 0) {
 }
 
 
+
+
 ##########################################################################
-# Fit models and compute test MSE
+# function: model_fits
+# fits ridgless, lasso, ridge and computes mse for test set
+# if train=1 we also get mse for train set
 model_fits <- function(train_X, train_y, test_X, test_y, train) {
   
   
@@ -105,7 +125,7 @@ model_fits <- function(train_X, train_y, test_X, test_y, train) {
  
   
   # Ridgeless OLS
-  beta_rl <- ridgeless_fit(train_X, train_y)
+  beta_rl <- ridgeless_fit(train_X, train_y, lambda = 0.00001)
   rl_pred <- as.numeric(test_X %*% beta_rl)
   ridgeless_mse <- mean((test_y - rl_pred)^2)
   
@@ -136,12 +156,20 @@ model_fits <- function(train_X, train_y, test_X, test_y, train) {
               train_ridgless_mse = train_ridgless_mse))
   
 }
+
+
+
+
 ##########################################################################
-# Compute single simulation
+# function: compute_simulation
+# this funciton computes a single simulation for a given n, p, s, SNR
+# if SNR = 0 we use the initial dgp otherwise we use Hastie's
 # train variable controls whether we include training mse also to get another graph
+# 
 compute_simulation <- function(n, p, s, seed, train = 0, SNR) {
   set.seed(seed)
   
+  # generate data 
   if (SNR == 0) {
     dat <- generate_data(n, p, s)
   } else {
@@ -152,9 +180,7 @@ compute_simulation <- function(n, p, s, seed, train = 0, SNR) {
   X <- as.matrix(sim_df[, -1])
   y <- sim_df$y
   
-  ###############################################
   # train/test split
-  ###########################################
   n_train <- floor(0.8 * n)
   train_idx <- sample(seq_len(n), n_train)
   test_idx <- setdiff(seq_len(n), train_idx)
@@ -164,15 +190,22 @@ compute_simulation <- function(n, p, s, seed, train = 0, SNR) {
   train_y <- y[train_idx]
   test_y <- y[test_idx]
 
-  
+  # model fitting
   mse_vec <- model_fits(train_X, train_y, test_X, test_y, train)
   return(mse_vec)
 }
 
-# Simulation study over varying p
+
+
+##########################################################################
+# function: sim_study
+# calls the compute_simulation study for a given sample size n, 
+# num replicates J, covariate sequence, potentially redundant number of 
+# nonzero covariates s_fixed, train indicator, potentially redundant SNR
 sim_study <- function(n, J, p_seq, s_fixed = 10, train, SNR) {
   num_p <- length(p_seq)
   
+  # data storage
   lasso_mse <-  matrix(NA, nrow = J, ncol= num_p)
   ridge_mse <-  matrix(NA, nrow = J, ncol= num_p)
   ridgeless_mse <-  matrix(NA, nrow = J, ncol= num_p)
@@ -183,7 +216,7 @@ sim_study <- function(n, J, p_seq, s_fixed = 10, train, SNR) {
     train_ridgeless_mse <-  matrix(NA, nrow = J, ncol= num_p)
   }
 
-  
+  # iterates over p sequence and replicates
   for (i in 1:num_p) {
     cat("Running p =", p_seq[i], "of", p_seq[num_p], "\n")
     for(j in 1:J) {
@@ -213,8 +246,13 @@ sim_study <- function(n, J, p_seq, s_fixed = 10, train, SNR) {
               ridgeless_mse = ridgeless_mse))
 }
 
+
+
+
 ##########################################################################
-# calls the sim study and returns plot of test mse, optiol to include plot of train mse
+# function: complete_run
+# calls the sim study and returns plot-ready test_mse_df, 
+# optional to include plot of train_mse_df if train ==1
 complete_run <- function(n, J, p_seq, s_fixed, train, SNR) {
   # Run simulation
   results <- sim_study(n, J, p_seq, s_fixed, train, SNR)
@@ -235,7 +273,6 @@ complete_run <- function(n, J, p_seq, s_fixed, train, SNR) {
     SD = c(lasso_sd, ridge_sd,  ridgeless_sd)
   )
   
-  # Plot
 
   
   if (train == 1) {
@@ -263,6 +300,7 @@ complete_run <- function(n, J, p_seq, s_fixed, train, SNR) {
 
 
 
+
 ####################################################################################
 # *********************************************************************************
 #####################################################################################
@@ -270,16 +308,17 @@ complete_run <- function(n, J, p_seq, s_fixed, train, SNR) {
 # end of functions
 
 # Parameters
-n <- 250
-J <- 30
-p_seq <- seq(10, 600, by = 10)
-s_fixed <-  50  # small sparsity to show double descent
+n <- 250 # sample size
+J <- 30 # number of sims
+p_seq <- seq(10, 600, by = 10) # parameter sequence
+s_fixed <-  50  # small sparsity to show double descent, redundant if SNR > 1
 
-plot_dfs <- complete_run(n, J, p_seq, s_fixed, train = 1, SNR = 5)
+
+plot_dfs <- complete_run(n, J, p_seq, s_fixed, train = 1, SNR = 1)
 
 test_mse_df <- plot_dfs$test_mse_df
 
-# potentially wont exist
+# wont exist if train != 1
 train_mse_df <- plot_dfs$train_mse_df
 
 # plot
@@ -289,7 +328,7 @@ test_plot <- ggplot(test_mse_df, aes(x = p, y = MSE, color = Method)) +
   geom_errorbar(aes(ymin = MSE - SD, ymax = MSE + SD), width = 5, alpha = 0.3) +
   labs(
     title = "Double Descent Simulation",
-    subtitle = paste0("n = 250, J = 30, SNR = 5"),
+    subtitle = paste0("n = 250, J = 30, SNR = 1"),
     x = "Number of Predictors (p)",
     y = "Test MSE"
   ) +
