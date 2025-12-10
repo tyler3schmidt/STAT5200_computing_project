@@ -125,7 +125,7 @@ model_fits <- function(train_X, train_y, test_X, test_y, train) {
  
   
   # Ridgeless OLS
-  beta_rl <- ridgeless_fit(train_X, train_y, lambda = 0.00001)
+  beta_rl <- ridgeless_fit(train_X, train_y)
   rl_pred <- as.numeric(test_X %*% beta_rl)
   ridgeless_mse <- mean((test_y - rl_pred)^2)
   
@@ -311,7 +311,7 @@ complete_run <- function(n, J, p_seq, s_fixed, train, SNR) {
 n <- 250 # sample size
 J <- 30 # number of sims
 p_seq <- seq(10, 600, by = 10) # parameter sequence
-s_fixed <-  50  # small sparsity to show double descent, redundant if SNR > 1
+s_fixed <-  50  # small sparsity to show double descent, redundant if SNR != 0
 
 
 plot_dfs <- complete_run(n, J, p_seq, s_fixed, train = 1, SNR = 1)

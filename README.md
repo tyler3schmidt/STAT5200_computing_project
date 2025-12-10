@@ -15,7 +15,7 @@ The initial data generating process is implemented in the generate_data function
 The code has a functional-style, and the only direct interaction should be with the complete_run function at the bottom.
 To use the initial simulation simply set SNR == 0 otherwise hastie's setup will be run.
 Furthermore, if train is equal to 1 then the simulation will include results for the training data. If train is not 
-equal to 1 then we only get the test results. The code takes around 10 minutes to run.
+equal to 1 then we only get the test results. The code takes around 15 minutes to run.
 
 ## Signal to Noise Ratio Clarification
 The hastie simulation allows you to set a desired signal to noise ratio, SNR. To achieve this in the paper they give the following formuatl 
